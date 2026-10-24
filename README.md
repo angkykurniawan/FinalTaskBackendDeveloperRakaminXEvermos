@@ -354,53 +354,6 @@ flowchart TD
 
 ---
 
-### 🧪 4. Panduan Praktis Uji Coba Hak Akses (User vs Admin)
-
-Ikuti skenario berikut untuk mempraktikkan verifikasi hak akses di Postman:
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Tester as Penguji (Postman)
-    participant API as Server Fiber
-    participant DB as Basis Data MySQL
-
-    Note over Tester, API: 1. UJI PENOLAKAN USER BIASA
-    Tester->>API: POST /category (Token User Biasa)
-    API->>DB: SELECT role FROM users WHERE id = 1
-    DB-->>API: role = 'user'
-    API-->>Tester: 403 Forbidden ("Akses ditolak: Fitur ini hanya dapat diakses oleh Admin")
-
-    Note over Tester, DB: 2. PROMOSI PERAN KE ADMIN
-    Tester->>DB: UPDATE users SET role = 'admin' WHERE id = 1;
-
-    Note over Tester, API: 3. UJI KEBERHASILAN ADMIN (TANPA RE-LOGIN)
-    Tester->>API: POST /category (Token yang Sama)
-    API->>DB: SELECT role FROM users WHERE id = 1
-    DB-->>API: role = 'admin'
-    API-->>Tester: 201 Created (Data Kategori Berhasil Ditambahkan!)
-```
-
-1. **Langkah 1 (Uji Sebagai Pengguna Biasa)**:
-   - Buat akun baru via `POST /auth/register` dan lakukan login via `POST /auth/login`. Akun baru otomatis memiliki status `role = 'user'`.
-   - Buka request **Category > Post Category** di Postman dan kirim request.
-   - **Hasil**: Server menolak dengan kode **`403 Forbidden`** (*"Akses ditolak: Fitur ini hanya dapat diakses oleh Admin"*).
-2. **Langkah 2 (Promosikan Menjadi Admin di Database)**:
-   - Buka terminal MySQL / aplikasi pengelola basis data (Laragon, XAMPP, HeidiSQL, DBeaver) dan jalankan:
-     ```sql
-     UPDATE users SET role = 'admin' WHERE id = 1;
-     ```
-3. **Langkah 3 (Uji Sebagai Admin Tanpa Login Ulang)**:
-   - Jalankan kembali request **Post Category**, **Update Category**, atau **Delete Category** di Postman menggunakan token yang sama.
-   - **Hasil**: Server langsung menerima request dengan kode **`201 Created`** atau **`200 OK`**.
-4. **Langkah 4 (Mengembalikan Peran Menjadi User Biasa)**:
-   - Kembalikan status role akun:
-     ```sql
-     UPDATE users SET role = 'user' WHERE id = 1;
-     ```
-
----
-
 ## 📑 Spesifikasi Endpoint API Lengkap
 
 > 💡 **Legenda Badge Hak Akses:**
