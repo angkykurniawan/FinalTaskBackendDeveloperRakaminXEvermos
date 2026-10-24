@@ -1,0 +1,11 @@
+.env
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+temp_reference/
+uploads/*
+!uploads/.gitkeep

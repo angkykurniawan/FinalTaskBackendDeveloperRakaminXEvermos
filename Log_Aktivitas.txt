@@ -1,0 +1,88 @@
+# LOG AKTIVITAS PENGERJAAN PROYEK
+
+[Inisialisasi]
+- Persiapan struktur workspace dan inisialisasi berkas catatan aktivitas (Log_Aktivitas.txt).
+
+[Analisis Kebutuhan & Riset Referensi]
+- Membaca dan menelaah spesifikasi tugas akhir backend (Auth, User, Toko, Alamat, Kategori, Produk, Transaksi, Log Produk).
+- Melakukan pengecekan referensi repositori BaskoroR725/MiniProject-BaskoroRamadhan untuk membedah routing, struktur schema database, dan collection Postman.
+- Memverifikasi endpoint dan payload pada file Postman Collection (Rakamin Evermos Virtual Internship.postman_collection.json).
+- Menyiapkan database MySQL lokal 'evermos_mini' dan memastikan service aktif.
+- Merancang arsitektur aplikasi berbasis Clean Architecture (Domain Models, Repository Layer, Usecase/Service Layer, Delivery/Handler Layer, Middleware, Utilities).
+
+[Setup Environment & Dependensi]
+- Inisialisasi modul Go (go mod init evermos-mini).
+- Konfigurasi dependensi inti: Fiber v2, GORM MySQL driver, Golang JWT v5, Bcrypt, dan Godotenv.
+- Pembuatan file .env dan .env.example untuk konfigurasi database, port server, dan secret key JWT.
+- Pembuatan direktori uploads/ beserta .gitkeep untuk penanganan file upload foto.
+
+[Implementasi Domain Models & Database]
+- Pembuatan model domain User (relasi Toko, Alamat, Transaksi).
+- Pembuatan model domain Toko (one-to-one dengan User).
+- Pembuatan model domain Alamat (foreign key UserID).
+- Pembuatan model domain Category (relasi Produk).
+- Pembuatan model domain Produk (relasi Toko dan Category).
+- Pembuatan model domain LogProduk sebagai snapshot historis produk saat transaksi.
+- Pembuatan model domain Transaksi dan DetailTransaksi (relasi LogProduk).
+- Konfigurasi database MySQL pada package config/database.go dengan connection pooling (SetMaxIdleConns, SetMaxOpenConns, SetConnMaxLifetime).
+- Pembuatan seeder kategori awal (Fashion, Aksesoris, Rumah Tangga) pada package config/seeder.go.
+
+[Implementasi Utilitas & Middleware]
+- Pembuatan helper hash password menggunakan bcrypt (utils/hash_utils.go).
+- Pembuatan utilitas JWT untuk generate dan verifikasi claims token (utils/jwt_utils.go).
+- Pembuatan helper standarisasi format response JSON dan pagination (utils/response_utils.go).
+- Pembuatan middleware JWTProtected yang mendukung pembacaan header 'Authorization' (Bearer) maupun header 'token' (middleware/jwt_middleware.go).
+- Pembuatan middleware AdminOnly dengan validasi status role pengguna terkini langsung dari database (middleware/admin_middleware.go).
+
+[Implementasi Repository Layer]
+- Pembuatan interface dan implementasi UserRepository (repositories/user_repository.go).
+- Pembuatan interface dan implementasi TokoRepository (repositories/toko_repository.go).
+- Pembuatan interface dan implementasi AlamatRepository (repositories/alamat_repository.go).
+- Pembuatan interface dan implementasi CategoryRepository (repositories/category_repository.go).
+- Pembuatan interface dan implementasi ProductRepository (repositories/product_repository.go).
+- Pembuatan interface dan implementasi TrxRepository dengan penanganan atomic database transaction (repositories/trx_repository.go).
+
+[Implementasi Usecase / Business Logic Layer]
+- Pembuatan AuthUsecase: validasi unik email & no telepon, hashing kata sandi, auto-create toko saat pendaftaran pengguna berhasil, dan validasi kredensial login (usecases/auth_usecase.go).
+- Pembuatan UserUsecase: view profil lengkap beserta relasi toko/alamat/transaksi, serta update profil dengan pencegahan duplikasi data unik (usecases/user_usecase.go).
+- Pembuatan TokoUsecase: view toko, list toko dengan pagination, serta update toko dengan proteksi otorisasi pemilik toko (usecases/toko_usecase.go).
+- Pembuatan AlamatUsecase: CRUD alamat pengiriman dengan isolasi data agar pengguna tidak dapat mengakses alamat pengguna lain (usecases/alamat_usecase.go).
+- Pembuatan CategoryUsecase: CRUD kategori produk (usecases/category_usecase.go).
+- Pembuatan ProductUsecase: katalog produk dengan filtering komprehensif (nama, kategori, toko, rentang harga) dan pagination, pembuatan slug, upload gambar, pencatatan log produk snapshot, serta validasi otorisasi kepemilikan toko (usecases/product_usecase.go).
+- Pembuatan TrxUsecase: pembuatan transaksi dengan validasi alamat pengiriman milik pengguna, pengecekan stok, pengurangan stok otomatis, pencatatan snapshot produk ke tabel log_produks, pembuatan invoice unik, dan penyimpanan detail transaksi dalam database transaction (usecases/trx_usecase.go).
+- Pembuatan ProvCityUsecase: integrasi HTTP client ke API wilayah Indonesia emsifa.com untuk data provinsi dan kota/kabupaten (usecases/provcity_usecase.go).
+
+[Implementasi Controller & Routing HTTP]
+- Pembuatan AuthController (controllers/auth_controller.go).
+- Pembuatan UserController (controllers/user_controller.go).
+- Pembuatan TokoController dengan dukungan upload multipart form-data (controllers/toko_controller.go).
+- Pembuatan AlamatController (controllers/alamat_controller.go).
+- Pembuatan CategoryController terproteksi AdminOnly (controllers/category_controller.go).
+- Pembuatan ProductController dengan dukungan upload foto produk multipart form-data (controllers/product_controller.go).
+- Pembuatan TrxController (controllers/trx_controller.go).
+- Pembuatan ProvCityController (controllers/provcity_controller.go).
+- Pengaturan routing utama (routes/routes.go) yang 100% kompatibel dengan Rakamin Evermos Postman Collection.
+- Konfigurasi entry point main.go dengan middleware CORS, Logger, Recover, AutoMigrate, dan static file serving folder uploads/.
+
+[Pengujian & Verifikasi Kinerja]
+- Uji kompilasi kode: build sukses tanpa error.
+- Uji eksekusi server: koneksi MySQL aktif, AutoMigrate berhasil membuat seluruh tabel, dan seeder kategori awal sukses dieksekusi.
+- Uji Auth & Toko: registrasi pengguna baru berhasil, toko otomatis terbentuk sesuai nama pengguna, login menghasilkan token JWT yang valid.
+- Uji Alamat: penambahan alamat baru sukses dan terisolasi per pengguna.
+- Uji Produk: upload file gambar produk berhasil tersimpan di folder uploads/, endpoint filter & pagination bekerja sesuai query parameter.
+- Uji Transaksi & Log Produk: checkout berhasil, stok produk otomatis berkurang, snapshot harga historis dan detail produk sukses tersimpan di tabel log_produks.
+- Uji Keamanan Otorisasi Admin: endpoint POST/PUT/DELETE category menolak akses pengguna biasa (403 Forbidden). Setelah role diubah langsung di database menjadi 'admin', request kategori berhasil diproses secara instan.
+- Uji Isolasi Data (Data Isolation): verifikasi bahwa user tidak dapat melihat atau mengubah alamat, toko, produk, maupun transaksi milik user lain. Seluruh skenario penolakan akses berhasil lolos pengujian.
+- Pembuatan dokumentasi komprehensif README.md dan penyiapan Postman Collection pada root proyek.
+
+[Status Akhir Proyek]
+- Seluruh kebutuhan fungsional dan non-fungsional tugas akhir telah terpenuhi 100%.
+- Server backend berjalan aktif di port :8080 dengan database MySQL lokal (evermos_mini).
+- Koleksi Postman dan dokumentasi panduan pengujian telah siap digunakan untuk tahap evaluasi.
+- Menyiapkan dan mendokumentasikan panduan langkah demi langkah testing API menggunakan Postman.
+
+[Konsultasi & Rencana Pengembangan Frontend]
+- Diskusi dan analisis opsi integrasi antarmuka pengguna (Frontend) untuk melengkapi REST API backend.
+
+
+
