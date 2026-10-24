@@ -45,16 +45,17 @@ Seluruh endpoint dan format respons dirancang agar selaras 100% dengan alur uji 
 - `PUT /toko/:id_toko`: Mengubah identitas toko dan mengunggah logo gerai melalui *multipart form-data* (khusus bagi pemilik gerai).
 
 ### 🏷️ 4. Tata Kelola Kategori Produk (Hak Akses Admin)
-- `GET /category`: Menampilkan katalog kategori produk dengan dukungan filter pencarian dan paginasi (Akses Publik).
-- `GET /category/:id`: Memperoleh rincian satu kategori produk berdasarkan ID (Akses Publik).
-- `POST /category`: Mendaftarkan nama kategori baru (**Eksklusif Administrator**).
-- `PUT /category/:id`: Mengubah identitas kategori produk (**Eksklusif Administrator**).
-- `DELETE /category/:id`: Menghapus kategori produk (**Eksklusif Administrator**).
-- **Verifikasi Status Admin Dinamis**:
-  Sistem memeriksa kolom `role` secara langsung ke basis data saat request diterima. Perubahan hak akses cukup dijalankan via perintah SQL:
+- `GET /category`: Menampilkan katalog kategori produk dengan dukungan filter pencarian dan paginasi (🌐 **Akses Publik**).
+- `GET /category/:id`: Memperoleh rincian satu kategori produk berdasarkan ID (🌐 **Akses Publik**).
+- `POST /category`: Mendaftarkan nama kategori baru (🛡️ **Eksklusif Administrator**).
+- `PUT /category/:id`: Mengubah identitas kategori produk (🛡️ **Eksklusif Administrator**).
+- `DELETE /category/:id`: Menghapus kategori produk (🛡️ **Eksklusif Administrator**).
+- **Verifikasi Status Admin Dinamis (Tanpa Perlu Login Ulang)**:
+  Sistem memeriksa kolom `role` langsung ke basis data pada setiap request. Jika user biasa (`role = 'user'`) mencoba mengakses endpoint create/update/delete kategori, sistem akan menolak dengan status `403 Forbidden`. Untuk memberikan hak akses admin, cukup jalankan query SQL:
   ```sql
   UPDATE users SET role = 'admin' WHERE id = 1;
   ```
+  Perubahan ini langsung aktif seketika pada token yang sama tanpa perlu login ulang (*re-login*).
 
 ### 📦 5. Manajemen Produk & Inventaris
 - `GET /product`: Menampilkan etalase produk publik yang dilengkapi parameter filter lengkap:
@@ -236,23 +237,183 @@ Untuk menjamin kesinambungan alur relasi data:
 7. **Product > Get All Product (`GET /product`)**: Menjalankan pengujian filter rentang harga, nama barang, kategori, serta navigasi paginasi.
 8. **Trx > Post Trx (`POST /trx`)**: Melakukan pemesanan barang. Sistem memotong sisa persediaan dan merekam snapshot kondisi produk ke tabel log.
 9. **Trx > Get All Trx (`GET /trx`)**: Menampilkan daftar rekap transaksi pemesan beserta item log snapshot produk.
-10. **Category (Pengujian Hak Akses Admin)**:
-    - Buka terminal MySQL dan perbarui peran user menjadi admin:
+10. **Category (Pengujian Hak Akses Admin vs User Biasa)**:
+    - **Uji Penolakan (User Biasa)**: Jalankan permintaan **Post Category (`POST /category`)** menggunakan token akun biasa. Sistem otomatis menolak dengan respon status `403 Forbidden` (*"Akses ditolak: Fitur ini hanya dapat diakses oleh Admin"*).
+    - **Promosikan Akun ke Admin**: Buka terminal MySQL dan perbarui peran user menjadi admin:
       ```sql
       UPDATE users SET role = 'admin' WHERE id = 1;
       ```
-    - Jalankan permintaan **Post Category**, **Update Category By ID**, dan **Delete Category By ID**. Seluruh instruksi berhasil diproses seketika tanpa perlu login ulang.
+    - **Uji Keberhasilan (Admin)**: Jalankan kembali permintaan **Post Category**, **Update Category By ID**, dan **Delete Category By ID** menggunakan token yang sama. Seluruh permintaan langsung sukses (`201 Created` / `200 OK`) tanpa perlu *re-login* berkat verifikasi dinamis ke basis data.
 11. **Province City**: Jalankan seluruh endpoint pada folder `Province City` untuk memeriksa integrasi data geografis Indonesia dari layanan `emsifa.com`.
+
+---
+
+## 🔐 Panduan & Sistem Hak Akses (RBAC & Data Ownership)
+
+Sistem mengadopsi model keamanan **3 Lapis (Defense-in-Depth)** yang memadukan **Otentikasi Token JWT**, **Role-Based Access Control (RBAC)** dinamis, dan **Resource Ownership (Isolasi Data Antar-Pengguna)**. Model ini memastikan setiap pengguna hanya dapat menjalankan operasi sesuai wewenang dan kepemilikan asetnya.
+
+---
+
+### 👥 1. Empat Tingkatan Hak Akses (Role & Privilege Levels)
+
+| Badge | Tingkat Hak Akses | Syarat & Header | Siapa Penggunanya? | Cakupan Hak Akses (Apa yang Boleh Dilakukan?) |
+| :---: | :--- | :--- | :--- | :--- |
+| 🌐 | **Publik (Tamu)** | Tanpa Token | Pengunjung umum / klien belum login | • Melihat etalase katalog & detail produk (`GET /product`)<br>• Melihat direktori toko terdaftar (`GET /toko`)<br>• Melihat katalog kelompok kategori (`GET /category`)<br>• Melihat data wilayah Indonesia (`GET /provcity/*`)<br>• Mendaftarkan akun baru & melakukan login (`POST /auth/*`) |
+| 👤 | **User (JWT)** | Header `Authorization: Bearer <token>` atau `token: <token>` | Seluruh pengguna terdaftar yang sudah login (`role = 'user'`) | • Melihat & memperbarui data profil akun sendiri (`/user`)<br>• Menambah & mengelola buku alamat pribadi (`/user/alamat`)<br>• Melihat rincian toko milik sendiri (`GET /toko/my`)<br>• Menambah produk baru ke toko sendiri (`POST /product`)<br>• Melakukan checkout belanjaan (`POST /trx`)<br>• Melihat rekap transaksi pesanan sendiri (`GET /trx`) |
+| 🏪 | **Pemilik Toko** | Token JWT + Kepemilikan Sah (`user_id` / `toko_id`) | Akun login yang merupakan pemilik sah toko / barang dagangan | • Mengubah nama & logo tokonya sendiri (`PUT /toko/:id_toko`)<br>• Mengubah harga, persediaan, & foto produk miliknya (`PUT /product/:id`)<br>• Menghapus produk dari etalase toko miliknya (`DELETE /product/:id`)<br>⚠️ *Sistem menolak modifikasi jika aset tersebut milik toko user lain.* |
+| 🛡️ | **Admin Only** | Token JWT + Status `role = 'admin'` di database | Administrator / Pengelola Platform | • Menambahkan master kategori baru (`POST /category`)<br>• Mengubah nama kelompok kategori (`PUT /category/:id`)<br>• Menghapus data kelompok kategori (`DELETE /category/:id`)<br>• Memiliki seluruh kapabilitas operasional pengguna standar |
+
+---
+
+### 📊 2. Matriks Hak Akses Seluruh Endpoint (Access Control Matrix)
+
+Gunakan matriks ringkas berikut untuk memahami wewenang setiap peran pada setiap endpoint API:
+
+| Modul | Endpoint | Method | 🌐 Publik | 👤 User | 🏪 Pemilik | 🛡️ Admin | Proteksi & Aturan Hak Akses |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| **Auth** | `/auth/register` | `POST` | ✅ | ❌ | ❌ | ❌ | Registrasi publik; otomatis membuat toko baru |
+| | `/auth/login` | `POST` | ✅ | ❌ | ❌ | ❌ | Otentikasi nomor telepon & password -> terbit JWT |
+| **User** | `/user` | `GET`, `PUT` | ❌ | ✅ | ✅ | ✅ | **Terisolasi**: Hanya data profil milik akun yang login |
+| **Alamat** | `/user/alamat` | `GET`, `POST` | ❌ | ✅ | ✅ | ✅ | **Terisolasi**: Buku alamat pribadi milik akun login |
+| | `/user/alamat/:id` | `GET`, `PUT`, `DELETE` | ❌ | ✅ | ✅ | ✅ | **Terisolasi**: Query dibatasi `id = ? AND user_id = ?` |
+| **Toko** | `/toko`, `/toko/:id_toko` | `GET` | ✅ | ✅ | ✅ | ✅ | Katalog etalase toko dapat diakses publik |
+| | `/toko/my` | `GET` | ❌ | ✅ | ✅ | ✅ | Khusus melihat toko milik pengguna yang login |
+| | `/toko/:id_toko` | `PUT` | ❌ | ❌ | ✅ | ❌ | **Hanya Pemilik Toko Sah** (`toko.user_id = user_id`) |
+| **Kategori** | `/category`, `/category/:id` | `GET` | ✅ | ✅ | ✅ | ✅ | Katalog kategori produk terbuka bebas untuk umum |
+| | `/category` | `POST` | ❌ | ❌ | ❌ | ✅ | **Khusus Admin**: User biasa menerima respon `403 Forbidden` |
+| | `/category/:id` | `PUT`, `DELETE` | ❌ | ❌ | ❌ | ✅ | **Khusus Admin**: User biasa menerima respon `403 Forbidden` |
+| **Produk** | `/product`, `/product/:id` | `GET` | ✅ | ✅ | ✅ | ✅ | Katalog etalase publik (filter nama, harga, kategori, toko) |
+| | `/product` | `POST` | ❌ | ✅ | ✅ | ✅ | Menerbitkan produk baru ke dalam toko milik akun login |
+| | `/product/:id` | `PUT`, `DELETE` | ❌ | ❌ | ✅ | ❌ | **Hanya Pemilik Produk Sah** (`produk.toko_id = user_toko_id`) |
+| **Transaksi**| `/trx`, `/trx/:id` | `GET` | ❌ | ✅ | ✅ | ✅ | **Terisolasi**: Riwayat pesanan milik akun yang login |
+| | `/trx` | `POST` | ❌ | ✅ | ✅ | ✅ | Checkout pesanan (alamat wajib milik akun login) |
+| | `/trx/:id/status` | `PUT` | ❌ | ✅ | ✅ | ✅ | Pembaruan status pemesanan barang |
+| **Wilayah** | `/provcity/*` | `GET` | ✅ | ✅ | ✅ | ✅ | Data referensi wilayah publik Indonesia (emsifa.com) |
+
+---
+
+### 🛡️ 3. Arsitektur Verifikasi 3 Lapis (Three-Tier Security Enforcement)
+
+Setiap request HTTP yang masuk ke backend disaring melalui tiga tahapan keamanan secara berurutan:
+
+```mermaid
+flowchart TD
+    Req([Client HTTP Request]) --> AuthCheck{Perlu Token JWT?}
+    AuthCheck -- Tidak (🌐 Publik) --> AllowPub([200 OK / Lolos Eksekusi])
+    AuthCheck -- Ya --> JwtValid{Token Valid & Aktif?}
+    JwtValid -- Tidak / Kosong / Expired --> Err401[⛔ 401 Unauthorized<br>'Token otentikasi tidak ditemukan']
+    JwtValid -- Ya --> RoleCheck{Perlu Hak Akses Admin?}
+    RoleCheck -- Ya --> DbRole{Status 'role' di Database?}
+    DbRole -- role != 'admin' --> Err403[🚫 403 Forbidden<br>'Akses ditolak: Fitur ini hanya dapat diakses oleh Admin']
+    DbRole -- role == 'admin' --> AllowAdmin([200/201 OK / Lolos Eksekusi])
+    RoleCheck -- Tidak --> OwnerCheck{Pengecekan Kepemilikan Data?}
+    OwnerCheck -- Akses Aset Milik Orang Lain --> Err400[⚠️ 400 Bad Request<br>'Akses ditolak: Anda tidak memiliki wewenang']
+    OwnerCheck -- Data Milik Akun Sendiri --> AllowUser([200 OK / Lolos Eksekusi])
+```
+
+#### 🔹 Lapis 1: Otentikasi Pengguna (JWT Middleware)
+- **File Implementasi**: [jwt_middleware.go](file:///c:/Users/ANG-PC/Downloads/FinalTaskBackendRakamin/middleware/jwt_middleware.go)
+- **Cara Kerja**: Membaca token dari header standar `Authorization: Bearer <token>` maupun header pengujian `token: <token>`. Jika token tidak ada, tidak valid, atau telah melampaui masa aktif 24 jam, server langsung menghentikan request.
+- **Contoh Respon Penolakan (HTTP 401 Unauthorized)**:
+  ```json
+  {
+    "status": false,
+    "message": "Token otentikasi tidak ditemukan"
+  }
+  ```
+
+#### 🔹 Lapis 2: Otorisasi Peran Admin Dinamis (Admin Middleware)
+- **File Implementasi**: [admin_middleware.go](file:///c:/Users/ANG-PC/Downloads/FinalTaskBackendRakamin/middleware/admin_middleware.go)
+- **Cara Kerja**: Khusus untuk endpoint `/category` (`POST`, `PUT`, `DELETE`), middleware memeriksa langsung kolom `role` pengguna ke tabel basis data:
+  ```sql
+  SELECT id, role FROM users WHERE id = ?;
+  ```
+- **Kelebihan Pendekatan Dinamis**: Sistem **tidak bergantung** pada klaim statis di dalam payload JWT. Jika seorang pengguna dinaikkan perannya menjadi `admin` melalui query SQL di database, hak akses langsung aktif seketika pada token yang sedang dipakai **tanpa perlu login ulang / membuat token baru**.
+- **Contoh Respon Penolakan (HTTP 403 Forbidden)**:
+  ```json
+  {
+    "status": false,
+    "message": "Akses ditolak: Fitur ini hanya dapat diakses oleh Admin"
+  }
+  ```
+
+#### 🔹 Lapis 3: Kontrol Kepemilikan & Isolasi Data (Data Ownership / Resource Isolation)
+- **File Implementasi**: [toko_usecase.go](file:///c:/Users/ANG-PC/Downloads/FinalTaskBackendRakamin/usecases/toko_usecase.go), [product_usecase.go](file:///c:/Users/ANG-PC/Downloads/FinalTaskBackendRakamin/usecases/product_usecase.go), [alamat_usecase.go](file:///c:/Users/ANG-PC/Downloads/FinalTaskBackendRakamin/usecases/alamat_usecase.go), [trx_usecase.go](file:///c:/Users/ANG-PC/Downloads/FinalTaskBackendRakamin/usecases/trx_usecase.go)
+- **Cara Kerja**: Pengguna yang sah (ber-token) tetap tidak boleh mengakses atau mengubah data milik pengguna lain:
+  - **Toko**: Mengubah profil toko diverifikasi dengan `toko.UserID == userID`. Jika berbeda -> Ditolak.
+  - **Produk**: Memperbarui/menghapus produk diverifikasi dengan `product.TokoID == userToko.ID`. Jika user mencoba mengedit produk dari toko orang lain -> Ditolak.
+  - **Alamat Kirim**: Setiap query alamat selalu dikunci ganda `WHERE id = ? AND user_id = ?`.
+  - **Transaksi Belanja**: Checkout transaksi memeriksa kepemilikan alamat kirim (`FindByIDAndUserID`). Riwayat transaksi hanya menampilkan data nota pesanan milik user pembuat transaksi.
+- **Contoh Respon Penolakan (HTTP 400 Bad Request)**:
+  ```json
+  {
+    "status": false,
+    "message": "akses ditolak: Anda tidak memiliki wewenang untuk mengubah toko ini"
+  }
+  ```
+
+---
+
+### 🧪 4. Panduan Praktis Uji Coba Hak Akses (User vs Admin)
+
+Ikuti skenario berikut untuk mempraktikkan verifikasi hak akses di Postman:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Tester as Penguji (Postman)
+    participant API as Server Fiber
+    participant DB as Basis Data MySQL
+
+    Note over Tester, API: 1. UJI PENOLAKAN USER BIASA
+    Tester->>API: POST /category (Token User Biasa)
+    API->>DB: SELECT role FROM users WHERE id = 1
+    DB-->>API: role = 'user'
+    API-->>Tester: 403 Forbidden ("Akses ditolak: Fitur ini hanya dapat diakses oleh Admin")
+
+    Note over Tester, DB: 2. PROMOSI PERAN KE ADMIN
+    Tester->>DB: UPDATE users SET role = 'admin' WHERE id = 1;
+
+    Note over Tester, API: 3. UJI KEBERHASILAN ADMIN (TANPA RE-LOGIN)
+    Tester->>API: POST /category (Token yang Sama)
+    API->>DB: SELECT role FROM users WHERE id = 1
+    DB-->>API: role = 'admin'
+    API-->>Tester: 201 Created (Data Kategori Berhasil Ditambahkan!)
+```
+
+1. **Langkah 1 (Uji Sebagai Pengguna Biasa)**:
+   - Buat akun baru via `POST /auth/register` dan lakukan login via `POST /auth/login`. Akun baru otomatis memiliki status `role = 'user'`.
+   - Buka request **Category > Post Category** di Postman dan kirim request.
+   - **Hasil**: Server menolak dengan kode **`403 Forbidden`** (*"Akses ditolak: Fitur ini hanya dapat diakses oleh Admin"*).
+2. **Langkah 2 (Promosikan Menjadi Admin di Database)**:
+   - Buka terminal MySQL / aplikasi pengelola basis data (Laragon, XAMPP, HeidiSQL, DBeaver) dan jalankan:
+     ```sql
+     UPDATE users SET role = 'admin' WHERE id = 1;
+     ```
+3. **Langkah 3 (Uji Sebagai Admin Tanpa Login Ulang)**:
+   - Jalankan kembali request **Post Category**, **Update Category**, atau **Delete Category** di Postman menggunakan token yang sama.
+   - **Hasil**: Server langsung menerima request dengan kode **`201 Created`** atau **`200 OK`**.
+4. **Langkah 4 (Mengembalikan Peran Menjadi User Biasa)**:
+   - Kembalikan status role akun:
+     ```sql
+     UPDATE users SET role = 'user' WHERE id = 1;
+     ```
 
 ---
 
 ## 📑 Spesifikasi Endpoint API Lengkap
 
+> 💡 **Legenda Badge Hak Akses:**
+> - 🌐 **Publik**: Dapat diakses bebas oleh siapa saja tanpa autentikasi / token.
+> - 👤 **User (JWT)**: Wajib melampirkan Token JWT aktif (`Authorization: Bearer <token>` atau `token: <token>`).
+> - 🏪 **Pemilik Toko**: Wajib Token JWT & hanya pemilik sah atas toko / produk terkait (Proteksi Isolasi Data).
+> - 🛡️ **Admin Only**: Wajib Token JWT dari akun yang memiliki kolom `role = 'admin'` di database.
+
 ### 🔑 1. Autentikasi Pengguna (`/auth`)
 | Method | Rute Endpoint | Penjelasan Fungsi | Hak Akses |
 | :---: | :--- | :--- | :---: |
-| `POST` | `/auth/register` | Mendaftarkan akun pemakai baru (sekaligus mendirikan gerai toko) | Terbuka |
-| `POST` | `/auth/login` | Memvalidasi kredensial pengguna dan menerbitkan JWT token | Terbuka |
+| `POST` | `/auth/register` | Mendaftarkan akun pemakai baru (sekaligus mendirikan gerai toko) | 🌐 Publik |
+| `POST` | `/auth/login` | Memvalidasi kredensial pengguna dan menerbitkan JWT token | 🌐 Publik |
 
 **Format Payload Pendaftaran Akun (`POST /auth/register`):**
 ```json
@@ -282,19 +443,19 @@ Untuk menjamin kesinambungan alur relasi data:
 ### 👤 2. Profil Pengguna (`/user`)
 | Method | Rute Endpoint | Penjelasan Fungsi | Hak Akses |
 | :---: | :--- | :--- | :---: |
-| `GET` | `/user` | Memuat profil lengkap pengguna aktif beserta data toko, alamat, dan transaksi | Token JWT |
-| `PUT` | `/user` | Memperbarui informasi biodata profil akun aktif | Token JWT |
+| `GET` | `/user` | Memuat profil lengkap pengguna aktif beserta data toko, alamat, dan transaksi | 👤 User (JWT) |
+| `PUT` | `/user` | Memperbarui informasi biodata profil akun aktif | 👤 User (JWT) |
 
 ---
 
 ### 📍 3. Alamat Pengiriman Pengguna (`/user/alamat`)
 | Method | Rute Endpoint | Penjelasan Fungsi | Hak Akses |
 | :---: | :--- | :--- | :---: |
-| `GET` | `/user/alamat` | Menampilkan seluruh koleksi alamat milik pengguna aktif | Token JWT |
-| `GET` | `/user/alamat/:id` | Menampilkan lembar rincian satu alamat tertentu | Token JWT |
-| `POST` | `/user/alamat` | Menyimpan entri alamat kirim baru | Token JWT |
-| `PUT` | `/user/alamat/:id` | Mengubah rincian data alamat yang terdaftar | Token JWT |
-| `DELETE` | `/user/alamat/:id` | Menghapus entri alamat kirim | Token JWT |
+| `GET` | `/user/alamat` | Menampilkan seluruh koleksi alamat milik pengguna aktif | 👤 User (JWT) |
+| `GET` | `/user/alamat/:id` | Menampilkan lembar rincian satu alamat tertentu | 👤 User (JWT) |
+| `POST` | `/user/alamat` | Menyimpan entri alamat kirim baru | 👤 User (JWT) |
+| `PUT` | `/user/alamat/:id` | Mengubah rincian data alamat yang terdaftar | 👤 User (JWT) |
+| `DELETE` | `/user/alamat/:id` | Menghapus entri alamat kirim | 👤 User (JWT) |
 
 **Format Payload Alamat (`POST /user/alamat`):**
 ```json
@@ -315,10 +476,10 @@ Untuk menjamin kesinambungan alur relasi data:
 ### 🏬 4. Manajemen Gerai Toko (`/toko`)
 | Method | Rute Endpoint | Penjelasan Fungsi | Hak Akses |
 | :---: | :--- | :--- | :---: |
-| `GET` | `/toko` | Menampilkan etalase toko terdaftar (dukungan paginasi & filter nama gerai) | Terbuka |
-| `GET` | `/toko/my` | Mengambil data toko yang dimiliki oleh pengguna aktif | Token JWT |
-| `GET` | `/toko/:id_toko` | Menampilkan rincian gerai berdasarkan ID toko | Terbuka |
-| `PUT` | `/toko/:id_toko` | Memperbarui nama dan berkas logo gerai toko (`multipart/form-data`) | Pemilik Toko |
+| `GET` | `/toko` | Menampilkan etalase toko terdaftar (dukungan paginasi & filter nama gerai) | 🌐 Publik |
+| `GET` | `/toko/my` | Mengambil data toko yang dimiliki oleh pengguna aktif | 👤 User (JWT) |
+| `GET` | `/toko/:id_toko` | Menampilkan rincian gerai berdasarkan ID toko | 🌐 Publik |
+| `PUT` | `/toko/:id_toko` | Memperbarui nama dan berkas logo gerai toko (`multipart/form-data`) | 🏪 Pemilik Toko |
 
 > **Panduan Berkas Toko:** Kirimkan request bertipe `multipart/form-data` dengan field `nama_toko` (teks) dan `photo` (file gambar).
 
@@ -327,22 +488,22 @@ Untuk menjamin kesinambungan alur relasi data:
 ### 🏷️ 5. Tata Kelola Kategori Barang (`/category`)
 | Method | Rute Endpoint | Penjelasan Fungsi | Hak Akses |
 | :---: | :--- | :--- | :---: |
-| `GET` | `/category` | Menampilkan seluruh kategori produk dengan paginasi & pencarian | Terbuka |
-| `GET` | `/category/:id` | Menampilkan rincian informasi kategori berdasarkan ID | Terbuka |
-| `POST` | `/category` | Menambahkan kelompok kategori baru | Khusus Admin |
-| `PUT` | `/category/:id` | Memperbarui nama kelompok kategori | Khusus Admin |
-| `DELETE` | `/category/:id` | Menghapus kelompok kategori | Khusus Admin |
+| `GET` | `/category` | Menampilkan seluruh kategori produk dengan paginasi & pencarian | 🌐 Publik |
+| `GET` | `/category/:id` | Menampilkan rincian informasi kategori berdasarkan ID | 🌐 Publik |
+| `POST` | `/category` | Menambahkan kelompok kategori baru | 🛡️ Admin Only |
+| `PUT` | `/category/:id` | Memperbarui nama kelompok kategori | 🛡️ Admin Only |
+| `DELETE` | `/category/:id` | Menghapus kelompok kategori | 🛡️ Admin Only |
 
 ---
 
 ### 📦 6. Etalase Produk Dagangan (`/product`)
 | Method | Rute Endpoint | Penjelasan Fungsi | Hak Akses |
 | :---: | :--- | :--- | :---: |
-| `GET` | `/product` | Menampilkan katalog produk publik dengan filter parameter komprehensif | Terbuka |
-| `GET` | `/product/:id` | Menampilkan spesifikasi rincian barang berdasarkan ID produk | Terbuka |
-| `POST` | `/product` | Menerbitkan produk dagangan baru di toko pengguna login | Token JWT |
-| `PUT` | `/product/:id` | Memperbarui spesifikasi & gambar barang milik toko pengguna | Pemilik Toko |
-| `DELETE` | `/product/:id` | Menghapus produk dagangan dari katalog toko | Pemilik Toko |
+| `GET` | `/product` | Menampilkan katalog produk publik dengan filter parameter komprehensif | 🌐 Publik |
+| `GET` | `/product/:id` | Menampilkan spesifikasi rincian barang berdasarkan ID produk | 🌐 Publik |
+| `POST` | `/product` | Menerbitkan produk dagangan baru di toko pengguna login | 👤 User (JWT) |
+| `PUT` | `/product/:id` | Memperbarui spesifikasi & gambar barang milik toko pengguna | 🏪 Pemilik Toko |
+| `DELETE` | `/product/:id` | Menghapus produk dagangan dari katalog toko | 🏪 Pemilik Toko |
 
 **Daftar Parameter URL pada `GET /product`:**
 - `page` (default: 1): Nomor halaman paginasi.
@@ -366,10 +527,10 @@ Untuk menjamin kesinambungan alur relasi data:
 ### 🧾 7. Pemrosesan Transaksi Belanja (`/trx`)
 | Method | Rute Endpoint | Penjelasan Fungsi | Hak Akses |
 | :---: | :--- | :--- | :---: |
-| `GET` | `/trx` | Menampilkan rekapitulasi riwayat pesanan milik akun aktif | Token JWT |
-| `GET` | `/trx/:id` | Menampilkan lembar detail nota pesanan spesifik | Token JWT |
-| `POST` | `/trx` | Melakukan checkout pesanan barang belanjaan | Token JWT |
-| `PUT` | `/trx/:id/status` | Memperbarui tahapan status pemesanan | Token JWT |
+| `GET` | `/trx` | Menampilkan rekapitulasi riwayat pesanan milik akun aktif | 👤 User (JWT) |
+| `GET` | `/trx/:id` | Menampilkan lembar detail nota pesanan spesifik | 👤 User (JWT) |
+| `POST` | `/trx` | Melakukan checkout pesanan barang belanjaan | 👤 User (JWT) |
+| `PUT` | `/trx/:id/status` | Memperbarui tahapan status pemesanan | 👤 User (JWT) |
 
 **Format Payload Pembelian (`POST /trx`):**
 ```json
@@ -390,24 +551,27 @@ Untuk menjamin kesinambungan alur relasi data:
 ### 🗺️ 8. Wilayah Administratif Indonesia (`/provcity`)
 | Method | Rute Endpoint | Penjelasan Fungsi | Hak Akses |
 | :---: | :--- | :--- | :---: |
-| `GET` | `/provcity/listprovincies` | Mengambil seluruh daftar provinsi se-Indonesia | Terbuka |
-| `GET` | `/provcity/listcities/:prov_id` | Mengambil rincian kota/kabupaten di dalam suatu provinsi | Terbuka |
-| `GET` | `/provcity/detailprovince/:prov_id` | Menampilkan informasi detail spesifik suatu provinsi | Terbuka |
-| `GET` | `/provcity/detailcity/:city_id` | Menampilkan informasi detail spesifik suatu kota/kabupaten | Terbuka |
+| `GET` | `/provcity/listprovincies` | Mengambil seluruh daftar provinsi se-Indonesia | 🌐 Publik |
+| `GET` | `/provcity/listcities/:prov_id` | Mengambil rincian kota/kabupaten di dalam suatu provinsi | 🌐 Publik |
+| `GET` | `/provcity/detailprovince/:prov_id` | Menampilkan informasi detail spesifik suatu provinsi | 🌐 Publik |
+| `GET` | `/provcity/detailcity/:city_id` | Menampilkan informasi detail spesifik suatu kota/kabupaten | 🌐 Publik |
 
 ---
 
 ## 🛡️ Mekanisme Keamanan & Integritas Data
 
+Sistem backend ini mengimplementasikan prinsip *defense-in-depth* dengan tiga garis pertahanan utama:
+
 1. **Otentikasi Token JWT**:
-   Seluruh endpoint terlindungi diamankan oleh middleware [jwt_middleware.go](file:///c:/Users/ANG-PC/Downloads/FinalTaskBackendRakamin/middleware/jwt_middleware.go). Sistem menerima header otentikasi standar `Authorization: Bearer <token>` maupun header `token: <token>` demi kepraktisan pengujian otomasi.
+   Seluruh endpoint privat dilindungi oleh middleware [jwt_middleware.go](file:///c:/Users/ANG-PC/Downloads/FinalTaskBackendRakamin/middleware/jwt_middleware.go). Sistem menerima header otentikasi standar `Authorization: Bearer <token>` maupun header `token: <token>` demi kepraktisan pengujian otomasi Postman. Jika token tidak ditemukan, tidak valid, atau telah kadaluarsa, sistem mengembalikan status `HTTP 401 Unauthorized`.
 2. **Validasi Otorisasi Administrator Dinamis**:
-   Pemeriksaan level hak akses Admin pada [admin_middleware.go](file:///c:/Users/ANG-PC/Downloads/FinalTaskBackendRakamin/middleware/admin_middleware.go) membaca langsung baris status `role` pengguna di basis data secara berkala per-request, sehingga ketentuan pengubahan hak akses langsung dari basis data dapat aktif seketika tanpa perlu proses *re-login*.
-3. **Isolasi Data Komprehensif (Data Isolation)**:
-   - Pengguna dilarang melihat maupun menyunting informasi profil akun milik orang lain.
+   Pemeriksaan hak akses Admin pada [admin_middleware.go](file:///c:/Users/ANG-PC/Downloads/FinalTaskBackendRakamin/middleware/admin_middleware.go) membaca langsung baris status `role` pengguna di basis data secara berkala per-request (`SELECT id, role FROM users WHERE id = ?`). Dengan arsitektur ini, perubahan hak akses langsung dari basis data dapat aktif seketika tanpa perlu proses *re-login*. Pengguna non-admin yang memanggil endpoint master kategori akan menerima penolakan `HTTP 403 Forbidden`.
+3. **Isolasi Data Komprehensif (Data Ownership & Resource Isolation)**:
+   - Pengguna dilarang melihat maupun menyunting informasi profil akun milik orang lain (`/user`).
    - Entri buku alamat dilindungi filter relasi ganda (`id = ? AND user_id = ?`).
-   - Penjualan barang dagangan dikunci ketat; pengguna hanya dapat mengedit dan menghapus produk yang terhubung dengan toko miliknya sendiri.
-   - Riwayat transaksi belanja terisolasi sepenuhnya berdasarkan identitas pengguna pembuat pesanan.
+   - Penjualan barang dagangan dikunci ketat; pengguna hanya dapat menyunting dan menghapus produk yang terhubung dengan toko miliknya sendiri (`toko_id = user_toko_id`).
+   - Riwayat transaksi belanja terisolasi sepenuhnya berdasarkan identitas pengguna pembuat pesanan (`WHERE id = ? AND user_id = ?`).
+   - Pelanggaran terhadap isolasi data ditolak dengan status respons `HTTP 400 Bad Request` berserta pesan informatif.
 
 ---
 
